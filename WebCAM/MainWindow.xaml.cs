@@ -43,6 +43,7 @@ namespace WebCamApp
             _cameraThread.Start();
         }
 
+        //Capture_Image
         private void CaptureCamera()
         {
             while (_isCapturing)
