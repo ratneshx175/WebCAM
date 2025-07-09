@@ -20,27 +20,92 @@
                     Click="SaveButton_Click" Background="#2196F3" Foreground="White"/>
             <Button Name="RecordButton" Content="⏺ Record" Width="100" Height="40" Margin="5"
                     Click="RecordButton_Click" Background="#FF5722" Foreground="White"/>
-            <ComboBox Name="FilterComboBox" Width="100" Height="30" Margin="5" SelectionChanged="FilterComboBox_SelectionChanged">
-                <ComboBoxItem Content="None" IsSelected="True"/>
-                <ComboBoxItem Content="B&amp;W"/>
-                <ComboBoxItem Content="Sepia"/>
-                <ComboBoxItem Content="Insta"/>
-            </ComboBox>
         </StackPanel>
 
         <!-- Camera Preview -->
         <Border Grid.Column="1" BorderBrush="#4CAF50" BorderThickness="3" CornerRadius="10" Margin="10">
-            <Image Name="WebcamImage" Stretch="UniformToFill" />
+            <Grid >
+                <!-- Video Player -->
+                <MediaElement x:Name="VideoPlayer"
+                  LoadedBehavior="Manual"
+                  UnloadedBehavior="Manual"
+                  Visibility="Collapsed"
+                  Stretch="UniformToFill"
+                  MediaOpened="VideoPlayer_MediaOpened"
+                  MediaEnded="VideoPlayer_MediaEnded" />
+
+                <TextBlock x:Name="RecordingTimer"
+           Text="00:00"
+           Foreground="Red"
+           FontSize="18"
+           FontWeight="Bold"
+           Background="#66000000"
+           Padding="5"
+           Margin="10"
+           HorizontalAlignment="Left"
+           VerticalAlignment="Top"
+           Visibility="Collapsed" />
+
+
+                <!-- Live Feed Image -->
+                <Image x:Name="WebcamImage"
+           Stretch="UniformToFill" />
+
+                <!-- Playback Controls -->
+                <StackPanel Orientation="Horizontal"
+                HorizontalAlignment="Center"
+                VerticalAlignment="Bottom"
+                Margin="0,0,0,10"
+                Visibility="Collapsed"
+                x:Name="VideoControlPanel">
+                    <Button x:Name="PlayPauseButton"
+                Content="⏸"
+                Width="50"
+                Height="30"
+                Click="PlayPauseButton_Click" />
+                    <Slider x:Name="VideoSeekSlider"
+        Width="300"
+        Margin="10,0"
+        Minimum="0"
+        ValueChanged="VideoSeekSlider_ValueChanged"
+        PreviewMouseDown="VideoSeekSlider_PreviewMouseDown"
+        PreviewMouseUp="VideoSeekSlider_PreviewMouseUp" />
+
+                    <TextBlock x:Name="VideoTimer"
+                   Foreground="White"
+                   VerticalAlignment="Center"
+                   FontSize="14"
+                   Text="00:00 / 00:00" />
+                    
+                </StackPanel>
+            </Grid>
+
         </Border>
 
         <!-- Right Buttons -->
         <StackPanel Grid.Column="2" Orientation="Vertical" VerticalAlignment="Center" Margin="10">
+            
             <Button Name="PlayButton" Content="▶️ Play" Width="100" Height="40" Margin="5"
                     Click="PlayButton_Click" Background="#9C27B0" Foreground="White"/>
             <Button Name="ResumeButton" Content="🔄 Resume" Width="100" Height="40" Margin="5"
                     Click="ResumeCamera_Click" Background="#607D8B" Foreground="White"/>
-            <Button Name="CancelButton" Content="❌ Cancel" Width="100" Height="40" Margin="5"
-                    Click="CancelButton_Click" Background="#F44336" Foreground="White"/>
+            <ComboBox Name="FilterComboBox"
+          Background="Blue"
+          Foreground="DarkCyan"
+          Width="100"
+          Height="40"
+          Margin="5"
+          SelectionChanged="FilterComboBox_SelectionChanged"
+          HorizontalContentAlignment="Center"
+          VerticalContentAlignment="Center">
+
+                <ComboBoxItem Content="None" IsSelected="True" HorizontalContentAlignment="Center" VerticalContentAlignment="Center"/>
+                <ComboBoxItem Content="B&amp;W" HorizontalContentAlignment="Center" VerticalContentAlignment="Center"/>
+                <ComboBoxItem Content="Sepia" HorizontalContentAlignment="Center" VerticalContentAlignment="Center"/>
+                <ComboBoxItem Content="Insta" HorizontalContentAlignment="Center" VerticalContentAlignment="Center"/>
+
+            </ComboBox>
+
         </StackPanel>
     </Grid>
 </Window>

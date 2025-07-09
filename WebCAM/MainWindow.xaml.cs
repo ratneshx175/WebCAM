@@ -5,9 +5,12 @@ using System.Windows.Media.Imaging;
 using OpenCvSharp;
 using OpenCvSharp.WpfExtensions;
 using System.Threading;
+using System.Windows.Controls;
+using System.Windows.Threading;
 
 namespace WebCamApp
 {
+
     public partial class MainWindow : System.Windows.Window
     {
         private VideoCapture _capture;
@@ -19,11 +22,27 @@ namespace WebCamApp
         private string _videoFilePath;
         private CascadeClassifier _faceCascade;
         private string _selectedFilter = "None";
+        private Mat _capturedImage;
+        private bool _isSeeking = false;
+        private DispatcherTimer _videoTimer;
+        private bool _isVideoPlaying = false;
+        private DispatcherTimer _recordingTimer;
+        private DateTime _recordingStartTime;
+
+
+
 
         public MainWindow()
         {
             InitializeComponent();
             _faceCascade = new CascadeClassifier("haarcascade_frontalface_default.xml");
+            _videoTimer = new DispatcherTimer();
+            _videoTimer.Interval = TimeSpan.FromMilliseconds(500);
+            _videoTimer.Tick += VideoTimer_Tick;
+            _recordingTimer = new DispatcherTimer();
+            _recordingTimer.Interval = TimeSpan.FromSeconds(1);
+            _recordingTimer.Tick += RecordingTimer_Tick;
+
             StartCamera();
         }
 
@@ -120,28 +139,81 @@ namespace WebCamApp
 
         private void CaptureButton_Click(object sender, RoutedEventArgs e)
         {
-            var captured = _frame.Clone();
-            WebcamImage.Source = BitmapSourceConverter.ToBitmapSource(captured);
-            string imgPath = $"Captured_{DateTime.Now:yyyyMMdd_HHmmss}.png";
-            Cv2.ImWrite(imgPath, captured);
-            MessageBox.Show($"📸 Image saved:\n{Path.GetFullPath(imgPath)}");
+            if (_frame == null || _frame.Empty())
+            {
+                MessageBox.Show("❌ No frame to capture.");
+                return;
+            }
+
+            // Clone the frame safely
+            _capturedImage = _frame.Clone();
+
+            // Pause live camera
+            _isCapturing = false;
+
+            // Safely update UI from UI thread
+            Dispatcher.Invoke(() =>
+            {
+                try
+                {
+                    WebcamImage.Source = BitmapSourceConverter.ToBitmapSource(_capturedImage);
+                }
+                catch (Exception ex)
+                {
+                    MessageBox.Show($"⚠️ Failed to display captured image.\n\n{ex.Message}");
+                }
+            });
         }
+
 
         private void SaveButton_Click(object sender, RoutedEventArgs e)
         {
-            if (!string.IsNullOrEmpty(_videoFilePath) && File.Exists(_videoFilePath))
+            if (_capturedImage != null)
             {
-                MessageBox.Show($"💾 Video saved at:", Path.GetFullPath(_videoFilePath));
+                var dialog = new Microsoft.Win32.SaveFileDialog
+                {
+                    FileName = $"Captured_{DateTime.Now:yyyyMMdd_HHmmss}",
+                    DefaultExt = ".png",
+                    Filter = "Image Files (*.png;*.jpg)|*.png;*.jpg"
+                };
+
+                if (dialog.ShowDialog() == true)
+                {
+                    Cv2.ImWrite(dialog.FileName, _capturedImage);
+                    MessageBox.Show($"✅ Image saved to:\n{dialog.FileName}");
+                }
+            }
+            else if (!string.IsNullOrEmpty(_videoFilePath) && File.Exists(_videoFilePath))
+            {
+                var dialog = new Microsoft.Win32.SaveFileDialog
+                {
+                    FileName = Path.GetFileName(_videoFilePath),
+                    DefaultExt = ".mp4",
+                    Filter = "Video Files (*.mp4)|*.mp4"
+                };
+
+                if (dialog.ShowDialog() == true)
+                {
+                    File.Copy(_videoFilePath, dialog.FileName, overwrite: true);
+                    MessageBox.Show($"🎥 Video saved to:\n{dialog.FileName}");
+                }
+            }
+            else
+            {
+                MessageBox.Show("⚠️ Nothing to save.");
             }
         }
+
+
 
         private void RecordButton_Click(object sender, RoutedEventArgs e)
         {
             if (!_isRecording)
             {
-                _videoFilePath = $"Video_{DateTime.Now:yyyyMMdd_HHmmss}.avi";
-                _videoWriter = new VideoWriter(_videoFilePath, FourCC.XVID, 30,
+                _videoFilePath = $"Video_{DateTime.Now:yyyyMMdd_HHmmss}.mp4";
+                _videoWriter = new VideoWriter(_videoFilePath, FourCC.H264, 30,
                     new OpenCvSharp.Size(_capture.FrameWidth, _capture.FrameHeight));
+
                 if (!_videoWriter.IsOpened())
                 {
                     MessageBox.Show("❌ Failed to start recording.");
@@ -151,21 +223,54 @@ namespace WebCamApp
                 _isRecording = true;
                 RecordButton.Content = "🟥 STOP";
                 RecordButton.Background = System.Windows.Media.Brushes.Red;
+                _recordingStartTime = DateTime.Now;
+                _recordingTimer.Start();
+                RecordingTimer.Text = "00:00";
+                RecordingTimer.Visibility = Visibility.Visible;
             }
             else
             {
                 _isRecording = false;
+                _recordingTimer.Stop();
+                RecordingTimer.Visibility = Visibility.Collapsed;
                 _videoWriter?.Release();
-                RecordButton.Content = "⏺ Record";
-                RecordButton.Background = new System.Windows.Media.SolidColorBrush((System.Windows.Media.Color)System.Windows.Media.ColorConverter.ConvertFromString("#FF5722"));
 
-                // Load preview
+                RecordButton.Content = "⏺ Record";
+                RecordButton.Background = new System.Windows.Media.SolidColorBrush(
+                    (System.Windows.Media.Color)System.Windows.Media.ColorConverter.ConvertFromString("#FF5722"));
+
+                // Stop capturing camera
+                _isCapturing = false;
+
+                // Hide webcam image and show media player
                 Dispatcher.Invoke(() =>
                 {
-                    WebcamImage.Source = new BitmapImage(new Uri(Path.GetFullPath(_videoFilePath)));
+                    WebcamImage.Visibility = Visibility.Collapsed;
+                    VideoPlayer.Visibility = Visibility.Visible;
+                    VideoControlPanel.Visibility = Visibility.Visible;
+
+                    try
+                    {
+                        VideoPlayer.Source = new Uri(Path.GetFullPath(_videoFilePath));
+                        VideoPlayer.LoadedBehavior = MediaState.Manual;
+                        VideoPlayer.UnloadedBehavior = MediaState.Manual;
+
+                        VideoPlayer.Play();
+                        _isVideoPlaying = true;
+                        PlayPauseButton.Content = "⏸";
+
+                        _videoTimer.Start();
+
+                    }
+                    catch (Exception ex)
+                    {
+                        MessageBox.Show($"⚠️ Failed to play video:\n\n{ex.Message}");
+                    }
                 });
+
             }
         }
+
 
         private void PlayButton_Click(object sender, RoutedEventArgs e)
         {
@@ -186,17 +291,27 @@ namespace WebCamApp
         {
             if (!_isCapturing)
             {
+                // Stop video playback and cleanup
+                VideoPlayer.Stop();
+                _isVideoPlaying = false;
+                _videoTimer.Stop();
+                PlayPauseButton.Content = "▶";
+
+                // Hide video player and controls
+                VideoPlayer.Visibility = Visibility.Collapsed;
+                VideoControlPanel.Visibility = Visibility.Collapsed;
+
+                // Show live camera feed again
+                WebcamImage.Visibility = Visibility.Visible;
+
                 _isCapturing = true;
                 _cameraThread = new Thread(CaptureCamera) { IsBackground = true };
                 _cameraThread.Start();
             }
         }
 
-        private void CancelButton_Click(object sender, RoutedEventArgs e)
-        {
-            _isCapturing = false;
-            WebcamImage.Source = null;
-        }
+
+
 
         private void Window_Closing(object sender, System.ComponentModel.CancelEventArgs e)
         {
@@ -209,5 +324,104 @@ namespace WebCamApp
         {
             _selectedFilter = ((System.Windows.Controls.ComboBoxItem)FilterComboBox.SelectedItem).Content.ToString();
         }
+
+
+        private void PlayPauseButton_Click(object sender, RoutedEventArgs e)
+        {
+            // Restart from beginning if at end
+            if (VideoPlayer.Position >= VideoPlayer.NaturalDuration.TimeSpan)
+            {
+                VideoPlayer.Position = TimeSpan.Zero;
+            }
+
+            if (!_isVideoPlaying)
+            {
+                VideoPlayer.Play();
+                _videoTimer.Start(); // Start syncing timer again
+                _isVideoPlaying = true;
+                PlayPauseButton.Content = "⏸";
+            }
+            else
+            {
+                VideoPlayer.Pause();
+                _videoTimer.Stop(); // Pause syncing
+                _isVideoPlaying = false;
+                PlayPauseButton.Content = "▶";
+            }
+        }
+
+
+
+        private void VideoTimer_Tick(object sender, EventArgs e)
+        {
+            if (!_isSeeking && VideoPlayer.NaturalDuration.HasTimeSpan)
+            {
+                VideoSeekSlider.Maximum = VideoPlayer.NaturalDuration.TimeSpan.TotalSeconds;
+                VideoSeekSlider.Value = VideoPlayer.Position.TotalSeconds;
+
+                var current = VideoPlayer.Position.ToString(@"mm\:ss");
+                var total = VideoPlayer.NaturalDuration.TimeSpan.ToString(@"mm\:ss");
+                VideoTimer.Text = $"{current} / {total}";
+            }
+        }
+
+
+
+        private void VideoSeekSlider_ValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
+        {
+            // Optional: for keyboard-only control
+            if (VideoPlayer.NaturalDuration.HasTimeSpan && !_isSeeking)
+            {
+                VideoPlayer.Position = TimeSpan.FromSeconds(VideoSeekSlider.Value);
+            }
+        }
+
+
+        private void VideoSeekSlider_PreviewMouseDown(object sender, System.Windows.Input.MouseButtonEventArgs e)
+        {
+            _isSeeking = true;
+        }
+
+        private void VideoSeekSlider_PreviewMouseUp(object sender, System.Windows.Input.MouseButtonEventArgs e)
+        {
+            _isSeeking = false;
+            VideoPlayer.Position = TimeSpan.FromSeconds(VideoSeekSlider.Value);
+        }
+
+
+        private void VideoPlayer_MediaEnded(object sender, RoutedEventArgs e)
+        {
+            VideoPlayer.Stop();
+            _isVideoPlaying = false;
+            _videoTimer.Stop(); // Stop updating slider
+            PlayPauseButton.Content = "▶";
+
+            VideoPlayer.Position = TimeSpan.Zero;
+
+        }
+
+
+
+
+        private void VideoPlayer_MediaOpened(object sender, RoutedEventArgs e)
+        {
+            VideoSeekSlider.Maximum = VideoPlayer.NaturalDuration.TimeSpan.TotalSeconds;
+        }
+
+        private bool _blink = false;
+        private void RecordingTimer_Tick(object sender, EventArgs e)
+        {
+            var elapsed = DateTime.Now - _recordingStartTime;
+            Dispatcher.Invoke(() =>
+            {
+                _blink = !_blink;
+                RecordingTimer.Text = (_blink ? "🔴 " : "⚪ ") + elapsed.ToString(@"mm\:ss");
+            });
+        }
+
+
+
+
+
     }
 }
